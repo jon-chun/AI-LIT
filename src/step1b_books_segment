@@ -1,0 +1,344 @@
+# Segment books
+# Options: 
+#   By Syntax: a. chapter, b. paragraph
+#   By Semantics: a. topic modeling, b. fuzzy match of key NER word/phrases
+
+# SETUP BEFORE RUNNING
+# pip install spacy
+# python -m spacy download en_core_web_sm
+# python -m spacy download fr_core_news_sm (NOTE: no web, only news for SpaCy fr)
+# (and repeat for any other languages)
+SPACY_EN_MODEL = "en_core_web_sm"
+SPACY_FR_MODEL = "fr_core_news_sm"
+
+# SETUP AND CONFIGURATION
+from typing import Optional
+import logging
+import os
+import re
+import codecs
+import spacy
+from spacy.language import Language
+
+#load core english library 
+nlp = spacy.load(SPACY_EN_MODEL) 
+
+# Set SpaCy Parser max size (default 1M)
+nlp.max_length = 2000000 # (Proust's Swan's Way is >1.1M)
+
+# Max Book Length (so far)
+GLOBAL_max_book_chars = 0
+
+import os
+
+# Define Segmentation Method
+SEGMENTATION_TYPE = ['sentences', 'paragraphs', 'win20']
+SEGMENT_BY = SEGMENTATION_TYPE[0]
+
+# Define Extra Memory for SpaCy Parser (big files)
+SPACY_MORE_MEM = True
+
+# Define diretory by DEBUG Mode
+DEBUG_FLAG = False
+
+if DEBUG_FLAG:
+    # Debug Mode
+    SUBDIR_BOOKS_IN = os.path.join("data", "books")
+    SUBDIR_SEGMENTS_OUT = os.path.join("data", "step1_segments")
+else:
+    # Normal Execution Mode
+    SUBDIR_BOOKS_IN = os.path.join("..", "data", "books")
+    SUBDIR_SEGMENTS_OUT = os.path.join("..", "data", "step1_segments")
+
+
+# Fix the path separator for Windows
+SUBDIR_BOOKS_IN = os.path.normpath(SUBDIR_BOOKS_IN)
+SUBDIR_SEGMENTS_OUT = os.path.normpath(SUBDIR_SEGMENTS_OUT)
+
+
+# Check if the input directory exists
+if not os.path.exists(SUBDIR_BOOKS_IN):
+    logging.error(f"The specified directory does not exist: {SUBDIR_BOOKS_IN}")
+    print(f"ERROR: The specified directory does not exist: {SUBDIR_BOOKS_IN}")
+    exit(1)
+
+# COMMON FUNCTIONS
+
+def get_root_filename(filename: str, include_extension: bool = True) -> str:
+  """
+  Extracts the root filename from a string with format 
+  "book_<author>_<lang>_<title>_<modifier>_<clean/dirty>_<date>.txt"
+
+  Logs errors and prints them to the console. Handles cases where the filename format is unexpected.
+
+  Args:
+      filename: The filename string.
+      include_extension: Optional boolean flag to include the extension in the root filename (default: True).
+
+  Returns:
+      The root filename without any modifiers or date (or with extension based on flag). If the format is unexpected, returns the original filename.
+  """
+
+  # Configure logging (basic configuration) - assuming logging is already set up
+  # logging.basicConfig(...)  # Assuming this is done elsewhere in your code
+
+  try:
+    # Split the filename based on underscores
+    parts = filename.split("_")
+
+    # Check if the minimum expected parts (4) are present
+    if len(parts) < 4:
+      logging.warning(f"Unexpected filename format: {filename}. Returning original filename.")
+      return filename
+
+    # Extract parts upto title
+    root_parts = parts[0:4]
+
+    # Return filename by joining the parts with underscore
+    root_filename = "_".join(root_parts)
+    if include_extension:
+      root_filename += ".txt"
+    return root_filename
+
+  except Exception as e:
+    logging.exception(f"An unexpected error occurred: {e}. Returning original filename.")
+    return filename
+
+
+def book_segment_by_sentence(fullpath_book_in: str, fullpath_subdir_out: str = "") -> list[str]:
+    sentences = []
+    try:
+        # Read the book text from the specified file
+        with codecs.open(fullpath_book_in, "r", encoding="utf-8", errors="replace") as book_in:
+            book_text = book_in.read()
+
+        # Replace unprintable characters with a space
+        book_text = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', book_text)
+
+        # Split the text into sentences using regular expression
+        sentences = re.split(r'(?<=[.!?])\s+', book_text)
+
+    except FileNotFoundError as e:
+        logging.error(f"Error: File not found - {fullpath_book_in}")
+        return sentences  # Return empty list on error
+
+    except UnicodeDecodeError as e:
+        logging.error(f"Error: Unicode decoding error - {fullpath_book_in}")
+        return sentences  # Return empty list on error
+
+    except Exception as e:
+        logging.exception(f"An unexpected error occurred: {e}")
+        return sentences  # Return empty list on error
+
+    # Remove leading/trailing whitespace from each sentence and add to a list
+    trimmed_sentences = []
+    for sentence in sentences:
+        trimmed_sentence = sentence.strip()  # Remove leading/trailing whitespace
+        if trimmed_sentence:  # Only add non-empty sentences
+            trimmed_sentences.append(trimmed_sentence)
+
+    # Write the sentences to a file in the specified subdirectory (if provided)
+    if fullpath_subdir_out:
+        try:
+            # Create the output directory if it doesn't exist
+            os.makedirs(fullpath_subdir_out, exist_ok=True)
+
+            with codecs.open(os.path.join(fullpath_subdir_out, "sentences.txt"), "w", encoding="utf-8", errors="replace") as out_file:
+                for sentence in trimmed_sentences:
+                    out_file.write(sentence + "\n")  # Write each sentence on a new line
+
+        except UnicodeEncodeError as e:
+            logging.error(f"Error: Unicode encoding error - {fullpath_subdir_out}")
+
+        except Exception as e:
+            logging.exception(f"Error writing to file: {fullpath_subdir_out} - {e}")
+
+    # Return the list of trimmed sentences
+    return trimmed_sentences
+
+def book_segment_by(fullpath_book_in: str, book_lang: str = "en", segment_method: str = "sentences") -> list[str]:
+    # NOTE: Slow (reloads SpaCy nlp parser each time, but accomodates any order of file by lang/size)
+    # TODO: Option for faster batch processing which 1. groups input files by lang, 
+    #                                                2. get max length in each group
+    #                                                3. loads nlp model once per lang (with max memory)
+    global GLOBAL_max_book_chars
+    new_max_flag = False
+    segments = []
+    try:
+        # Read the book text from the specified file
+        with codecs.open(fullpath_book_in, "r", encoding="utf-8", errors="replace") as book_in:
+            book_text = book_in.read()
+
+        # Update max book length in char for SpaCy
+        if len(book_text) > GLOBAL_max_book_chars:
+            new_max_flag = True
+            GLOBAL_max_book_chars = len(book_text)
+
+        # Replace unprintable characters with a space
+        book_text = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', book_text)
+
+        print(f" len(book_text): {len(book_text)}")
+        print(f" book_text[:10]: {book_text[:10]}")
+
+        # Load the appropriate SpaCy model (by lang and size)
+        if book_lang == 'en':    
+            if (SPACY_MORE_MEM == True) and (new_max_flag):
+                # Load the spaCy English model with increased memory limit
+
+                # OPTION SpaCy Parser #1 
+                # Increase Memory for SpaCy parser 
+                nlp = spacy.load(SPACY_EN_MODEL)
+                # Set the maximum character limit based on the length of the input text
+                print(" UPDATE: Expanding SpaCy parser memory for this long book")
+                nlp.max_length = len(book_text) + 100
+                new_max_flag = False
+
+            else:
+                # OPTION SpaCy Parser #2
+                # Normal 1M SpaCy parser window
+                nlp = spacy.load(SPACY_EN_MODEL)
+
+        elif book_lang == 'fr':
+            if (SPACY_MORE_MEM == True) and (new_max_flag):
+                # Load the spaCy English model with increased memory limit
+                
+                # OPTION SpaCy Parser #1 
+                # Increase Memory for SpaCy parser 
+                nlp = spacy.load(SPACY_FR_MODEL)
+                # Set the maximum character limit based on the length of the input text
+                print(" UPDATE: Expanding SpaCy parser memory for this long book")
+                nlp.max_length = len(book_text) + 100
+                new_max_flag = False
+
+            else:
+                # OPTION SpaCy Parser #2
+                # Normal 1M SpaCy parser window
+                nlp = spacy.load(SPACY_FR_MODEL)
+
+                # Set the maximum character limit based on the length of the input text
+                print(" UPDATE: Expanding SpaCy parser memory for this long book")
+
+                # (DOES NOT WORK WITHOUT THIS)
+                nlp.max_length = len(book_text) + 100 
+
+        else:
+            print(f"ERROR: Cannot parse the language in this filename")
+
+
+        if segment_method == "sentences":
+            # Segment by sentences using SpaCy 
+            if SPACY_MORE_MEM == True:
+                # OPTION SpaCy Parser #2 
+                doc = nlp.pipe([book_text])
+                segments = [sent.text.strip() for doc_chunk in doc for sent in doc_chunk.sents]
+            else:
+                # OPTION SpaCy Parser #1:   
+                doc = nlp([book_text])
+                segments = [sent.text.strip() for sent in doc]
+
+        elif segment_method == "paragraphs":
+            # Segment text by paragraphs using robust SpaCy pipeline (e.g., 2+ newlines of any type)
+            @Language.component("paragraph_segmenter")
+            def paragraph_segmenter(doc):
+                for token in doc[:-1]:
+                    if token.text.endswith("\n\n"):
+                        doc[token.i + 1].is_sent_start = True
+                return doc
+
+            nlp.add_pipe("paragraph_segmenter", before="parser")
+            doc = nlp(book_text)
+            segments = [sent.text.strip() for sent in doc.sents]
+
+        elif segment_method.startswith("win") and segment_method[3:].isdigit():
+            # Segment text into chunks of specified character length (last may be ragged)
+            char_len = int(segment_method[3:])
+            segments = [book_text[i:i+char_len].strip() for i in range(0, len(book_text), char_len)]
+
+        else:
+            # Log and print an explanation of the error
+            error_message = f"Invalid segment_method: {segment_method}. Allowed values are 'sentence', 'paragraph', or 'winXXX' where XXX is an integer."
+            logging.error(error_message)
+            print(error_message)
+            return segments
+
+    except FileNotFoundError as e:
+        logging.error(f"Error: File not found - {fullpath_book_in}")
+        print(f"Error: File not found - {fullpath_book_in}")
+        return segments
+
+    except UnicodeDecodeError as e:
+        logging.error(f"Error: Unicode decoding error - {fullpath_book_in}")
+        print(f"Error: Unicode decoding error - {fullpath_book_in}")
+        return segments
+
+    except Exception as e:
+        logging.exception(f"An unexpected error occurred: {e}")
+        print(f"An unexpected error occurred: {e}")
+        return segments
+
+    """
+    # Create the output directory if it doesn't exist
+    os.makedirs(fullpath_subdir_out, exist_ok=True)
+
+    # Write the segments to a file in the specified subdirectory
+    output_file = os.path.join(fullpath_subdir_out, "segments.txt")
+    with codecs.open(output_file, "w", encoding="utf-8", errors="replace") as out_file:
+        for segment in segments:
+            out_file.write(segment + "\n")
+    """;
+
+    return segments
+
+
+
+# MAIN LOOP
+
+# Check DEBUG_FLAG for correct directory paths
+book_lang = 'en'
+
+subdir_book_files_in_list = sorted(os.listdir(SUBDIR_BOOKS_IN))
+for book_idx, book_file in enumerate(subdir_book_files_in_list):
+    if "_en_" in book_file:
+        book_lang = 'fr'
+        print(f"PROCESSING English book filename #{book_idx}: {book_file}")
+    elif "_fr_" in book_file:
+        book_lang = 'fr'
+        print(f"PROCESING French book filename #{book_idx}: {book_file}") 
+    else:
+        print(f"SKIPPING: non-En/Fr book filename #{book_idx}: {book_file}")
+        continue
+    
+    # Get full path to book filename 
+    fullpath_book_file_in = os.path.join(SUBDIR_BOOKS_IN, book_file)
+
+    # Get Book Title (filename without ".txt" extension)
+    # book_title = get_root_filename(book_file).replace(".txt","")
+    book_title = book_file.replace(".txt","")
+    print(f"  book_title: {book_title}")
+    
+    subdir_book_segments_out = os.path.join(SUBDIR_SEGMENTS_OUT, book_title)
+    print(f"subdir_book_segments_out  : {subdir_book_segments_out}")
+
+    # Check if subdir BookTitle exists under SUBDIR_BOOKS_OUT, create if missing 
+    if not os.path.exists(subdir_book_segments_out):
+        # Create the directory (including any missing parent directories)
+        os.makedirs(subdir_book_segments_out)
+        print(" subdir_book_segments_out: ", subdir_book_segments_out, "created successfully!")
+
+    fullpath_book_segment_file_out = os.path.join(subdir_book_segments_out, book_title+f"_{SEGMENT_BY}_raw.txt")
+    print(f"  fullpath_bookSegment_file_out: {fullpath_book_segment_file_out}")
+    try:
+        print(f" calling books_segement_by with fullpath_book_file_in: {fullpath_book_file_in}")
+        sentences_list = book_segment_by(fullpath_book_file_in, book_lang, SEGMENT_BY) # , fullpath_book_segment_file_out)
+        segments_filename = f"{book_title}_{SEGMENT_BY}.txt"
+        print(f" sentences_list len: {len(sentences_list)} [0][:50]: {sentences_list[0][:50]}")
+
+        with open(fullpath_book_segment_file_out, 'w', encoding='utf-8') as file:
+            for sentence in sentences_list:
+                file.write(sentence + "\n")
+        print(f"Successfully wrote {len(sentences_list)} sentences to {fullpath_book_segment_file_out}")
+
+        print("  COMPLETE\n\n\n")
+    except Exception as e:
+        logging.exception(f"An unexpected error occurred while processing the book: {book_title}")
+        print("  FAILED\n\n\n")
