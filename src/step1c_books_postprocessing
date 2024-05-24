@@ -138,7 +138,7 @@ def flat_concate_text(file_path, min_length=3):
     print(f"first 500 chars: {text[:500]}")
 
     # Replace multiple consecutive spaces with a single space
-    # text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s+", " ", text)
 
     # Strip leading/trailing whitespace
     text = text.strip()

@@ -164,81 +164,77 @@ def book_segment_by(fullpath_book_in: str, book_lang: str = "en", segment_method
     global GLOBAL_max_book_chars
     new_max_flag = False
     segments = []
-    paragraphs_clean_list = []
-    sentences_clean_list = []
     try:
         # Read the book text from the specified file
         with codecs.open(fullpath_book_in, "r", encoding="utf-8", errors="replace") as book_in:
             book_text = book_in.read()
-
-        # Strip leading/trailing whitespace
-        book_text = book_text.strip()
-
-        # Replace multiple consecutive newline characters with two newline characters
-        book_text_clean = re.sub(r"\n{2,}", "\n\n", book_text)
-
-        # book_text_clean = book_text
-        print(f"len(book_text_clean): {len(book_text_clean)}")
-        print(f"type(book_text_clean): {type(book_text_clean)}")
-
-        # Replace unprintable characters with a space
-        book_text_clean = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', book_text_clean)
-        print(f"  book_text_clean[:500] {book_text_clean[:500]}")
-        # Replace multiple consecutive spaces with a single space
-        # text = re.sub(r"\s+", " ", text)
-            
-        # Split into List of Paragraphs on ('\n\n')
-        # paragraphs_raw_list = re.split(r"\n{1,}", book_text_clean)
-        # print(f"paragraphs_raw_list {len(paragraphs_raw_list)}")
-        paragraphs_raw_list = book_text_clean.split("\n\n")
-        print(f"len(paragraphs_raw_list): {len(paragraphs_raw_list)}")
-        print(f"type(paragraphs_raw_list): {type(paragraphs_raw_list)}")
-
-
-        # First Join all lines into one text string
-        for i_index, paragraph_now in enumerate(paragraphs_raw_list):
-            paragraph_now = paragraph_now.strip()
-            paragraph_now_clean = (" ").join(paragraph_now.split())
-            paragraphs_clean_list.append(paragraph_now_clean)
-
-        print(f"  len(paragraphs_clean_list): {len(paragraphs_clean_list)}")
-
 
         # Update max book length in char for SpaCy
         if len(book_text) > GLOBAL_max_book_chars:
             new_max_flag = True
             GLOBAL_max_book_chars = len(book_text)
 
-
+        # Replace unprintable characters with a space
+        book_text = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', book_text)
 
         print(f" len(book_text): {len(book_text)}")
         print(f" book_text[:10]: {book_text[:10]}")
 
         # Load the appropriate SpaCy model (by lang and size)
         if book_lang == 'en':    
+            if (SPACY_MORE_MEM == True) and (new_max_flag):
+                # Load the spaCy English model with increased memory limit
+
+                # OPTION SpaCy Parser #1 
+                # Increase Memory for SpaCy parser 
+                nlp = spacy.load(SPACY_EN_MODEL)
+                # Set the maximum character limit based on the length of the input text
+                print(" UPDATE: Expanding SpaCy parser memory for this long book")
+                nlp.max_length = len(book_text) + 100
+                new_max_flag = False
+
+            else:
+                # OPTION SpaCy Parser #2
+                # Normal 1M SpaCy parser window
                 nlp = spacy.load(SPACY_EN_MODEL)
 
         elif book_lang == 'fr':
             if (SPACY_MORE_MEM == True) and (new_max_flag):
+                # Load the spaCy English model with increased memory limit
+                
+                # OPTION SpaCy Parser #1 
+                # Increase Memory for SpaCy parser 
                 nlp = spacy.load(SPACY_FR_MODEL)
+                # Set the maximum character limit based on the length of the input text
+                print(" UPDATE: Expanding SpaCy parser memory for this long book")
+                nlp.max_length = len(book_text) + 100
+                new_max_flag = False
+
+            else:
+                # OPTION SpaCy Parser #2
+                # Normal 1M SpaCy parser window
+                nlp = spacy.load(SPACY_FR_MODEL)
+
+                # Set the maximum character limit based on the length of the input text
+                print(" UPDATE: Expanding SpaCy parser memory for this long book")
+
+                # (DOES NOT WORK WITHOUT THIS)
+                nlp.max_length = len(book_text) + 100 
+
         else:
             print(f"ERROR: Cannot parse the language in this filename")
-            exit()
 
-        
+
         if segment_method == "sentences":
             # Segment by sentences using SpaCy 
-            for paragraph_index, paragraph_now in enumerate(paragraphs_clean_list):
-                doc = nlp([paragraph_now])
-
-                # OPTION #1:
-                # sentences_clean_list = [sent.text.strip() for sent in doc]
-                # OPTION #2:
-                for sentence_segmented in doc:
-                    sentences_clean_list.append(sentence_segmented.strip())
-                    sentences_clean_list.append("\n")
-            
-            return sentences_clean_list
+            if SPACY_MORE_MEM == True:
+                # OPTION SpaCy Parser #2 
+                doc = nlp.pipe([book_text])
+                segments = [sent.text.strip() for doc_chunk in doc for sent in doc_chunk.sents]
+            else:
+                # OPTION SpaCy Parser #1:   
+                doc = nlp([book_text])
+                segments = [sent.text.strip() for sent in doc]
 
         elif segment_method == "paragraphs":
             # Segment text by paragraphs using robust SpaCy pipeline (e.g., 2+ newlines of any type)
@@ -280,7 +276,18 @@ def book_segment_by(fullpath_book_in: str, book_lang: str = "en", segment_method
         print(f"An unexpected error occurred: {e}")
         return segments
 
-    return -1
+    """
+    # Create the output directory if it doesn't exist
+    os.makedirs(fullpath_subdir_out, exist_ok=True)
+
+    # Write the segments to a file in the specified subdirectory
+    output_file = os.path.join(fullpath_subdir_out, "segments.txt")
+    with codecs.open(output_file, "w", encoding="utf-8", errors="replace") as out_file:
+        for segment in segments:
+            out_file.write(segment + "\n")
+    """;
+
+    return segments
 
 
 
@@ -322,14 +329,14 @@ for book_idx, book_file in enumerate(subdir_book_files_in_list):
     print(f"  fullpath_bookSegment_file_out: {fullpath_book_segment_file_out}")
     try:
         print(f" calling books_segement_by with fullpath_book_file_in: {fullpath_book_file_in}")
-        segments_list = book_segment_by(fullpath_book_file_in, book_lang, SEGMENT_BY) # , fullpath_book_segment_file_out)
+        sentences_list = book_segment_by(fullpath_book_file_in, book_lang, SEGMENT_BY) # , fullpath_book_segment_file_out)
         segments_filename = f"{book_title}_{SEGMENT_BY}.txt"
-        print(f" len(segment_list): {len(segments_list)} [0][:50]: {segments_list[0][:50]}")
+        print(f" sentences_list len: {len(sentences_list)} [0][:50]: {sentences_list[0][:50]}")
 
         with open(fullpath_book_segment_file_out, 'w', encoding='utf-8') as file:
-            for sentence in segments_list:
+            for sentence in sentences_list:
                 file.write(sentence + "\n")
-        print(f"Successfully wrote {len(segments_list)} sentences to {fullpath_book_segment_file_out}")
+        print(f"Successfully wrote {len(sentences_list)} sentences to {fullpath_book_segment_file_out}")
 
         print("  COMPLETE\n\n\n")
     except Exception as e:

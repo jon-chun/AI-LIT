@@ -1,0 +1,101 @@
+# SETUP AND CONFIGURATION
+import os
+import re
+import shutil
+import string
+import codecs
+import logging
+
+
+# Define diretory by DEBUG Mode
+DEBUG_FLAG = False
+
+if DEBUG_FLAG:
+    # Debug Mode
+    SUBDIR_SEGMENT = os.path.join("data", "step1_segments")
+else:
+    # Normal Execution Mode
+    SUBDIR_SEGMENT = os.path.join("..", "data", "step1_segments")
+
+# Rule to filter out lines
+MIN_LENGTH = 3
+
+
+# COMMON FUNCTIONS
+
+def get_txt_file_paths(base_dir):
+    txt_file_paths = []
+    
+    # Traverse the directory tree starting from the base directory
+    for root, dirs, files in os.walk(base_dir):
+        # Iterate over each file in the current directory
+        for file in files:
+            # Check if the file has a .txt extension
+            if file.endswith(".txt"):
+                # Construct the full relative path to the .txt file
+                file_path = os.path.join(root, file)
+                # Append the file path to the list
+                txt_file_paths.append(file_path)
+    
+    return txt_file_paths
+
+
+def preprocess_text_file(file_path):
+    # Configure logging
+    logging.basicConfig(level=logging.ERROR, format="%(asctime)s - %(levelname)s - %(message)s")
+    
+    # Extract the directory and filename from the file path
+    directory = os.path.dirname(file_path)
+    filename = os.path.basename(file_path)
+    
+    # Create the new file name by removing the "_raw.txt" suffix
+    cleaned_filename = filename.replace("_raw.txt", ".txt")
+    cleaned_file_path = os.path.join(directory, cleaned_filename)
+
+    # Open the file for reading
+    with codecs.open(file_path, "r", encoding="utf-8", errors="replace") as file:
+        # Read the entire file contents
+        text = file.read()
+
+    # Replace illegal/non-printable characters with a space
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", " ", text)
+
+    # Replace multiple consecutive newline characters with two newline characters
+    # text = re.sub(r"\n{2,}", "\n\n", text)
+
+    # Replace multiple consecutive spaces with a single space
+    # text = re.sub(r"\s+", " ", text)
+
+    # Strip leading/trailing whitespace
+    text = text.strip()
+        
+    # Iterate over each line in the input file
+    paragraphs_list = re.split(r"\n{2,}", text)
+    print(f" paragraph count {len(paragraphs_list)}")
+    print(f" len: {len(paragraphs_list[0])}")
+
+    # First Join all lines into one text string
+    for i_index, paragraph_now in enumerate(paragraphs_list):
+        paragraph_clean = (" ").join(paragraph_now.split())
+        paragraphs_list[i_index] = paragraph_clean
+
+    full_text = ("\n\n").join(paragraphs_list)
+
+    return full_text
+
+
+# MAIN LOOP
+
+fullpath_segment_files_list = get_txt_file_paths(SUBDIR_SEGMENT)
+print(fullpath_segment_files_list)
+
+for i_index, fullpath_segment_file in enumerate(fullpath_segment_files_list):
+    print(f"PROCESSING segment file #{i_index}: {fullpath_segment_file}")
+    full_text_clean = preprocess_text_file(fullpath_segment_file)
+
+    # Create the new filename with the "_clean.txt" suffix
+    cleaned_filename = os.path.splitext(fullpath_segment_file)[0] + "_clean.txt"
+
+    # Save the cleaned text to the new file
+    with codecs.open(cleaned_filename, "w", encoding="utf-8") as cleaned_file:
+        cleaned_file.write(full_text_clean)
