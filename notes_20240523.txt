@@ -1,0 +1,97 @@
+              8F67-78E8
+
+Lang Det
+===
+chardet
+https://spacy.io/universe/project/spacy_fastlang
+
+Readability
+===
+https://spacy.io/universe/project/spacy_readability
+
+Clean
+===
+https://spacy.io/universe/project/spacy-cleaner
+
+
+https://spacy.io/universe/project/texthero
+https://github.com/jbesomi/texthero
+
+NER
+===
+
+Fuzzy
+===
+https://github.com/rapidfuzz/RapidFuzz
+
+Graphs
+===
+https://github.com/jboynyc/textnets
+
+
+Segmentation
+===
+Awesome open vocab sem seg: https://github.com/lucabarsellotti/awesome-open-vocabulary-semantic-segmentation
+
+Perplexityai: https://www.perplexity.ai/search/best-way-in-GGcOY1YfS3OsxwH01mB_vg 
+https://paperswithcode.com/task/text-segmentation
+
+Segmentation Libraries
+===
+RegEx
+NLTK
+SpaCy (pyBSD, Stanza)
+PySBD 
+Stanza 
+
+Transformer Wrappers
+===
+Huggingface
+https://spacy.io/universe/project/spacy-transformers 
+https://spacy.io/universe/project/spacy-wrap
+
+
+Embedding
+===
+Awesome: (Timeline & Papers) https://github.com/SuperBruceJia/Awesome-Semantic-Textual-Similarity
+Awesome: (Lib & Tools) https://github.com/Agrover112/awesome-semantic-search?tab=readme-ov-file#libraries-and-tools
+
+
+Embedding Libraries
+===
+Transformer Models in UKPLab sentence-transformers: https://github.com/UKPLab/sentence-transformers/blob/master/docs/quickstart.md
+Sentence-BERT: https://github.com/UKPLab/sentence-transformers/tree/master
+FastText: https://fasttext.cc/docs/en/unsupervised-tutorial.html
+Python-wordsegment 2018 https://github.com/grantjenks/python-wordsegment 
+
+
+Ensemble of Embeddings
+===
+https://python.langchain.com/v0.1/docs/modules/data_connection/retrievers/ensemble/
+
+
+Clustering
+===
+
+
+
+Similarity Metrics
+===
+Pearson, Spearman, MSE: https://www.perplexity.ai/search/as-of-May-ZPmYiyS.S9Ssl85eMfXM_g
+Leaderboard 4yr old: https://github.com/facebookresearch/SentEval?utm_source=catalyzex.com
+
+Recommendation Similarity
+===
+Colbert: https://github.com/stanford-futuredata/ColBERT
+Haystack:
+Elastisearch:
+
+Similarity Libraries
+===
+Scikit Pairwise Metrics for Dist: https://scikit-learn.org/stable/api/sklearn.metrics.html#module-sklearn.metrics.pairwise 
+Transformers: https://spacy.io/universe/project/spacy-sentence-bert
+SpaCy: https://spacy.io/universe/project/spacy-sentence-bert 
+LangChain:
+LlamaIndex: https://docs.llamaindex.ai/en/stable/examples/evaluation/semantic_similarity_eval/
+
+

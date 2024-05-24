@@ -5,20 +5,22 @@
 
 # SETUP BEFORE RUNNING
 # pip install spacy
-# python -m spacy download en_core_web_sm
-# python -m spacy download fr_core_news_sm (NOTE: no web, only news for SpaCy fr)
+# python -m spacy download en_core_web_md
+# python -m spacy download fr_core_news_md (NOTE: no web, only news for SpaCy fr)
 # (and repeat for any other languages)
-SPACY_EN_MODEL = "en_core_web_sm"
-SPACY_FR_MODEL = "fr_core_news_sm"
+SPACY_EN_MODEL = "en_core_web_md"
+SPACY_FR_MODEL = "fr_core_news_md"
 
 # SETUP AND CONFIGURATION
-from typing import Optional
+from typing import Optional, List, Tuple
 import logging
 import os
 import re
 import codecs
+import pysbd
 import spacy
 from spacy.language import Language
+
 
 #load core english library 
 nlp = spacy.load(SPACY_EN_MODEL) 
@@ -32,11 +34,25 @@ GLOBAL_max_book_chars = 0
 import os
 
 # Define Segmentation Method
-SEGMENTATION_TYPE = ['sentences', 'paragraphs', 'win20']
+SEGMENTATION_TYPE = ['sentence', 'paragraph', 'words20'] # win20 = 200 words (novel sentence len ~14-20 words)
 SEGMENT_BY = SEGMENTATION_TYPE[0]
+
+# Define Sentence Segmentation Library
+SENT_SEG_ALGO_TYPE = ['pysbd', 'spacy']
+SENT_SEG_ALGO = SENT_SEG_ALGO_TYPE[0]
 
 # Define Extra Memory for SpaCy Parser (big files)
 SPACY_MORE_MEM = True
+
+# Define Logging level (either "DEBUG" or "ERROR")
+LOGGING_LEVEL = "ERROR" # "DEBUG" 
+# logging.basicConfig(level=f"logging.{LOGGING_LEVEL}", format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Use the logging module's constants directly
+logging_level_constant = getattr(logging, LOGGING_LEVEL, logging.INFO)
+
+logging.basicConfig(level=logging_level_constant, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 # Define diretory by DEBUG Mode
 DEBUG_FLAG = False
@@ -55,12 +71,126 @@ else:
 SUBDIR_BOOKS_IN = os.path.normpath(SUBDIR_BOOKS_IN)
 SUBDIR_SEGMENTS_OUT = os.path.normpath(SUBDIR_SEGMENTS_OUT)
 
+# Minimum requried lengths for Paragrapsh (else filtered out)
+MIN_CHARS_PARAGRAPH = 50
+MIN_WORDS_PARAGRAPH = 5
+
 
 # Check if the input directory exists
 if not os.path.exists(SUBDIR_BOOKS_IN):
     logging.error(f"The specified directory does not exist: {SUBDIR_BOOKS_IN}")
     print(f"ERROR: The specified directory does not exist: {SUBDIR_BOOKS_IN}")
     exit(1)
+
+
+
+def create_base_subdir(model_config: str) -> Tuple[str, str, str, str]:
+    """
+    Create base subdirectories for a given model configuration.
+
+    Args:
+    - model_config (str): The model configuration string.
+
+    Returns:
+    - tuple: Four base directory paths (truth, sample, score, input).
+    """
+    try:
+        # Define a lookup for subdir_in based on the model configuration
+        subdir_lookup = {
+            "llama3-8b-q4km": os.path.join("..", "data", "wikifilmsum_large_filtered"),
+            "phi3-38b-q4km": os.path.join("..", "data", "wikifilmsum_small_filtered"),
+            "mistral-7b-instr-q4km": os.path.join("..", "data", "wikifilmsum_small_filtered"),
+        }
+
+        # Base directory paths
+        base_truth_dir = os.path.join("..", "data", "wikifilmsum_small_filtered")
+        base_sample_dir = os.path.join("..", "data", "step1out_generate_narrative_elements", model_config)
+        base_score_dir = os.path.join("..", "data", "step2out_score_narrative_elements", model_config)
+        
+        # Dynamic input directory based on the model configuration
+        subdir_in = subdir_lookup.get(model_config, os.path.join("..", "data", "default_directory"))
+        
+        # Ensure base directories exist
+        ensure_dir_exists(base_truth_dir)
+        ensure_dir_exists(base_sample_dir)
+        ensure_dir_exists(base_score_dir)
+        ensure_dir_exists(subdir_in)
+
+        return base_truth_dir, base_sample_dir, base_score_dir, subdir_in
+    except Exception as e:
+        logging.error(f"Error creating base subdirectories: {e}")
+        raise
+
+def is_title_case(s: str) -> bool:
+    """Check if a string is in title case."""
+    return s == s.title()
+
+def ensure_dir_exists(path: str) -> None:
+    """Ensure that the directory exists; if not, create it."""
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+def clean_paragraphs(paragraphs_raw_list: List[str]) -> List[str]:
+    """
+    Clean and filter a list of raw paragraphs based on specific criteria.
+
+    Args:
+    - paragraphs_raw_list (List[str]): List of raw paragraphs to be cleaned.
+
+    Returns:
+    - List[str]: List of cleaned paragraphs.
+    """
+    if not paragraphs_raw_list:
+        return []
+
+    pattern = re.compile(r'^(CHAPTER|SECTION|PART|Chapter|Section|Part)[\s.,;:!?\-«»]{0,5}(\d+|[IVXLCDM]+|[a-zA-Z]+)\b')
+    paragraphs_clean_list = []
+
+    try:
+        for paragraph_raw_now in paragraphs_raw_list:
+            logging.debug(f"Processing paragraph: {paragraph_raw_now}")
+            paragraph_clean_now = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', paragraph_raw_now)
+
+            # Check for alphabet letters (including French characters)
+            if not re.search(r'[a-zA-ZÀ-ÖØ-öø-ÿ]', paragraph_clean_now):
+                logging.debug("Skipping paragraph with no alphabet letters.")
+                continue
+
+            # Normalize whitespace and calculate length
+            normalized_paragraph = re.sub(r'\s+', ' ', paragraph_clean_now).strip()
+            if len(normalized_paragraph) <= MIN_CHARS_PARAGRAPH:
+                logging.debug("Skipping paragraph with insufficient length.")
+                continue
+
+            # Check for all caps and word count
+            words = normalized_paragraph.split()
+            all_caps_word_count = sum(1 for word in words if word.isupper())
+            if all_caps_word_count > MIN_WORDS_PARAGRAPH:
+                logging.debug("Skipping paragraph with too many all caps words.")
+                continue
+
+            # Check for the specific pattern at the start
+            if pattern.match(normalized_paragraph):
+                # Extract the potential subtitle/chapter heading
+                remaining_text = pattern.sub('', normalized_paragraph).strip()
+                remaining_words = remaining_text.split()
+                
+                # Check if the remaining words form a subtitle/chapter heading
+                if len(remaining_words) <= 7 and (all(word.isupper() for word in remaining_words) or is_title_case(remaining_text)):
+                    logging.debug("Skipping paragraph with chapter/section heading.")
+                    continue
+
+            # If all checks pass, add to the clean list
+            paragraphs_clean_list.append(paragraph_clean_now)
+            logging.debug("Paragraph added to clean list.")
+    
+    except Exception as e:
+        logging.error(f"Error processing paragraphs: {e}")
+
+    return paragraphs_clean_list
+
+
+
 
 # COMMON FUNCTIONS
 
@@ -156,7 +286,27 @@ def book_segment_by_sentence(fullpath_book_in: str, fullpath_subdir_out: str = "
     # Return the list of trimmed sentences
     return trimmed_sentences
 
-def book_segment_by(fullpath_book_in: str, book_lang: str = "en", segment_method: str = "sentences") -> list[str]:
+
+def split_and_join_strings(string_list, word_win=200, encoding='utf-8'):
+    try:
+        n = len(string_list)
+        num_lists = (n + word_win - 1) // word_win
+        
+        new_strings = []
+        for i in range(num_lists):
+            start_index = i * word_win
+            end_index = min((i + 1) * word_win, n)
+            smaller_list = string_list[start_index:end_index]
+            new_string = ' '.join(smaller_list).encode(encoding).decode(encoding)
+            new_strings.append(new_string)
+        
+        return new_strings
+    except Exception as e:
+        logging.error(f"An error occurred: {str(e)}")
+        raise
+
+
+def book_segment_by(fullpath_book_in: str, book_lang: str = "en", segment_method: str = "sentences", sent_segment_algo: str = 'pysbd') -> list[str]:
     # NOTE: Slow (reloads SpaCy nlp parser each time, but accomodates any order of file by lang/size)
     # TODO: Option for faster batch processing which 1. groups input files by lang, 
     #                                                2. get max length in each group
@@ -166,6 +316,10 @@ def book_segment_by(fullpath_book_in: str, book_lang: str = "en", segment_method
     segments = []
     paragraphs_clean_list = []
     sentences_clean_list = []
+
+    # Default SpaCy parser to use is en web md
+    nlp = spacy.load(SPACY_EN_MODEL)
+
     try:
         # Read the book text from the specified file
         with codecs.open(fullpath_book_in, "r", encoding="utf-8", errors="replace") as book_in:
@@ -175,26 +329,39 @@ def book_segment_by(fullpath_book_in: str, book_lang: str = "en", segment_method
         book_text = book_text.strip()
 
         # Replace multiple consecutive newline characters with two newline characters
-        book_text_clean = re.sub(r"\n{2,}", "\n\n", book_text)
-
+        # book_text_clean = re.sub(r"\n{2,}", "\n", book_text)
+        
         # book_text_clean = book_text
+        book_text_clean = book_text
         print(f"len(book_text_clean): {len(book_text_clean)}")
         print(f"type(book_text_clean): {type(book_text_clean)}")
 
-        # Replace unprintable characters with a space
-        book_text_clean = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', book_text_clean)
-        print(f"  book_text_clean[:500] {book_text_clean[:500]}")
-        # Replace multiple consecutive spaces with a single space
-        # text = re.sub(r"\s+", " ", text)
-            
         # Split into List of Paragraphs on ('\n\n')
         # paragraphs_raw_list = re.split(r"\n{1,}", book_text_clean)
         # print(f"paragraphs_raw_list {len(paragraphs_raw_list)}")
-        paragraphs_raw_list = book_text_clean.split("\n\n")
+        paragraphs_raw_list = [x.strip() for x in book_text_clean.split("\n") if len(x.strip()) > 0]
         print(f"len(paragraphs_raw_list): {len(paragraphs_raw_list)}")
         print(f"type(paragraphs_raw_list): {type(paragraphs_raw_list)}")
 
+        # paragraphs_filtered_list = []
+        # Remove Paragraphs that do not pass filter rules
+        paragraphs_filtered_list= clean_paragraphs(paragraphs_raw_list)
+        print(f"  FILTERED len(paragraphs_filtered_list): {len(paragraphs_filtered_list)} vs RAW len(paragraphs_raw_list): {len(paragraphs_raw_list)}")
 
+        # Replace unprintable characters with a space
+        paragraphs_clean_list = []
+        for paragraph_filtered_now in paragraphs_filtered_list:
+            print(f" paragraph_filtered_now: {paragraph_filtered_now[:10]}")
+            paragraph_clean_now = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', paragraph_filtered_now)
+            paragraphs_clean_list.append(paragraph_clean_now)
+        print(f"  len(paragraphs_clean_list): {len(paragraphs_clean_list)}")
+        # book_text_clean = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', book_text_clean)
+        print(f"  paragraph_clean_list[:5] {paragraphs_clean_list[:5]}")
+        # Replace multiple consecutive spaces with a single space
+        # text = re.sub(r"\s+", " ", text)
+        
+
+        """
         # First Join all lines into one text string
         for i_index, paragraph_now in enumerate(paragraphs_raw_list):
             paragraph_now = paragraph_now.strip()
@@ -204,15 +371,10 @@ def book_segment_by(fullpath_book_in: str, book_lang: str = "en", segment_method
         print(f"  len(paragraphs_clean_list): {len(paragraphs_clean_list)}")
 
 
-        # Update max book length in char for SpaCy
-        if len(book_text) > GLOBAL_max_book_chars:
-            new_max_flag = True
-            GLOBAL_max_book_chars = len(book_text)
-
-
-
         print(f" len(book_text): {len(book_text)}")
         print(f" book_text[:10]: {book_text[:10]}")
+        """;
+
 
         # Load the appropriate SpaCy model (by lang and size)
         if book_lang == 'en':    
@@ -226,43 +388,101 @@ def book_segment_by(fullpath_book_in: str, book_lang: str = "en", segment_method
             exit()
 
         
-        if segment_method == "sentences":
-            # Segment by sentences using SpaCy 
-            for paragraph_index, paragraph_now in enumerate(paragraphs_clean_list):
-                doc = nlp([paragraph_now])
+        if segment_method == "paragraphs":
 
-                # OPTION #1:
-                # sentences_clean_list = [sent.text.strip() for sent in doc]
-                # OPTION #2:
-                for sentence_segmented in doc:
-                    sentences_clean_list.append(sentence_segmented.strip())
-                    sentences_clean_list.append("\n")
+            return paragraphs_clean_list
+
+        elif segment_method == "sentence":
+
+            sentences_seg_clean_list = []
+
+            if sent_segment_algo == "pysbd":
+                # Segement using PySBD
+
+                seg_pysbd = pysbd.Segmenter(language="en", clean=False)
+                skipped_paragraphs = 0
+                processed_paragraphs = 0            
+                for paragraph_pysbd_clean_now in paragraphs_clean_list:
+                    processed_paragraphs += 1
+                    # Double check for empty paragraphs
+                    if not paragraph_pysbd_clean_now.strip():
+                        skipped_paragraphs += 1
+                        logging.warning(f"Skipping pysbd empty paragraph: {paragraph_now}")
+                        continue
+                    else:
+
+                        try:
+                            sentences_seg_clean_list.extend(seg_pysbd.segment(paragraph_pysbd_clean_now))
+                            print(f"len(sentences_pysbd_clean_list): {len(sentences_seg_clean_list)}")
+                            # sentences_seg_clean_list.extend([sent.text.strip() for sent in doc.sents])
+                        except Exception as e:
+                            skipped_paragraphs += 1
+                            logging.error(f"Error pysbd processing paragraph: {paragraph_now}. Error: {e}")
+                            continue
+
+            elif sent_segment_algo == 'spacy':
+                # Segment by SpaCy 
+
+                skipped_paragraphs = 0
+                processed_paragraphs = 0            
+
+                for paragraph_now in paragraphs_clean_list:
+                    processed_paragraphs += 1
+
+                    if isinstance(paragraph_now, list):
+                        skipped_paragraphs += 1
+                        logging.warning(f"Skipping SpaCy malformed paragraph (list): {paragraph_now}")
+                        continue
+
+                    try:
+                        doc = nlp(paragraph_now)
+                        sentences_seg_clean_list.extend([sent.text.strip() for sent in doc.sents])
+                    except Exception as e:
+                        skipped_paragraphs += 1
+                        logging.error(f"Error SpaCy processing paragraph: {paragraph_now}. Error: {e}")
+                        continue
+
+            else:
+
+                print(f"ERROR: Invalid Sentence Segment Algo, SENT_SEG_ALGO_TYPE: {SENT_SEG_ALGO_TYPE}")
+                exit()
+
+            total_paragraphs = processed_paragraphs
+            skipped_percentage = (skipped_paragraphs / total_paragraphs) * 100
+
+            print(f"Processed {processed_paragraphs} paragraphs.")
+            print(f"Skipped {skipped_paragraphs} malformed paragraphs.")
+            print(f"Percentage of SpaCy skipped paragraphs: {skipped_percentage:.2f}%")
             
-            return sentences_clean_list
+            return sentences_seg_clean_list
 
-        elif segment_method == "paragraphs":
-            # Segment text by paragraphs using robust SpaCy pipeline (e.g., 2+ newlines of any type)
-            @Language.component("paragraph_segmenter")
-            def paragraph_segmenter(doc):
-                for token in doc[:-1]:
-                    if token.text.endswith("\n\n"):
-                        doc[token.i + 1].is_sent_start = True
-                return doc
-
-            nlp.add_pipe("paragraph_segmenter", before="parser")
-            doc = nlp(book_text)
-            segments = [sent.text.strip() for sent in doc.sents]
-
-        elif segment_method.startswith("win") and segment_method[3:].isdigit():
+        elif segment_method.startswith("words") and segment_method[5:].isdigit():
+            window_of_words_list = []
             # Segment text into chunks of specified character length (last may be ragged)
-            char_len = int(segment_method[3:])
-            segments = [book_text[i:i+char_len].strip() for i in range(0, len(book_text), char_len)]
+            word_window_len = int(segment_method[5:])
+
+            # Split cleaned full text into Words
+            seg = pysbd.Segmenter(language=book_lang, clean=False)
+            word_list = seg.segment(book_text_clean)
+
+            # Split this list of all words into a list of strings created by combining sequenes of word_window_len words 
+            print(f"  Word Count len(word_list): {len(word_list)}")
+            if book_lang == 'en':
+                window_of_words_list = split_and_join_strings(french_string_list, word_win=200, encoding='utf-8')
+            elif book_lang == 'fr':
+                window_of_words_list = split_and_join_strings(french_string_list, word_win=200, encoding='iso-8859-1')
+            else:
+                print(f"ERROR:")
+                exit()
+
+            segments = [book_text[i:i+word_window_len].strip() for i in range(0, len(book_text), word_window_len)]
 
         else:
             # Log and print an explanation of the error
             error_message = f"Invalid segment_method: {segment_method}. Allowed values are 'sentence', 'paragraph', or 'winXXX' where XXX is an integer."
             logging.error(error_message)
             print(error_message)
+
             return segments
 
     except FileNotFoundError as e:
@@ -322,7 +542,7 @@ for book_idx, book_file in enumerate(subdir_book_files_in_list):
     print(f"  fullpath_bookSegment_file_out: {fullpath_book_segment_file_out}")
     try:
         print(f" calling books_segement_by with fullpath_book_file_in: {fullpath_book_file_in}")
-        segments_list = book_segment_by(fullpath_book_file_in, book_lang, SEGMENT_BY) # , fullpath_book_segment_file_out)
+        segments_list = book_segment_by(fullpath_book_file_in, book_lang, SEGMENT_BY, SENT_SEG_ALGO) # , fullpath_book_segment_file_out)
         segments_filename = f"{book_title}_{SEGMENT_BY}.txt"
         print(f" len(segment_list): {len(segments_list)} [0][:50]: {segments_list[0][:50]}")
 
