@@ -25,6 +25,7 @@ import pysbd
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Internal constant for the default path to the input file
+
 # Swan's Way by Proust in En (trans. Moncrieff)
 subdir_title = "book_proust_en_swans-way_moncrieff"
 filename_in = "book_proust_en_swans-way_moncrieff_sentence_raw.txt"
@@ -33,6 +34,15 @@ filename_out = "book_proust_en_swans-way_moncrieff_sentence_clean.txt"
 subdir_title = "book_proust_fr_swans-way_proust"
 filename_in = "book_proust_fr_swans-way_proust_sentence_raw.txt"
 filename_out = "book_proust_fr_swans-way_proust_sentence_clean.txt"
+# Swan's Way by Proust in En (trans. Enright)
+subdir_title = "book_proust_en_swans-way_enright"
+filename_in = "book_proust_en_swans-way_enright_sentence_raw.txt"
+filename_out = "book_proust_en_swans-way_enright_sentence_clean.txt"
+# Swan's Way by Proust in En (trans. Enright)
+subdir_title = "book_proust_en_swans-way_davis"
+filename_in = "book_proust_en_swans-way_davis_sentence_raw.txt"
+filename_out = "book_proust_en_swans-way_davis_sentence_clean.txt"
+
 
 # Construct FULLPATHs to INPUT and OUTPUT files
 FULLPATH_SEGMENTS_FILE_IN = os.path.join('..', 'data', 'step1_segments', subdir_title, filename_in)
