@@ -7,6 +7,9 @@ import time
 from tqdm import tqdm
 import pandas as pd
 
+# Number of model run per book
+MODEL_COUNT=4
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -20,18 +23,26 @@ def combine_files_into_dataframe(file_list, directory_path):
     """
     Combine the content of files into a Pandas DataFrame.
     """
-    data = {}
-    for file in file_list:
+    data_dict = {}
+    for file_index, file in enumerate(file_list):
+        print(f"    COMBINING #{file_index} file: {file}")
         filepath = os.path.join(directory_path, file)
         if os.path.isfile(filepath):
             column_name = file.split("_")[-1].split(".")[0]  # Use the part before the file extension as the column name
+            print(f"      column_name = {column_name}")
             try:
                 with open(filepath, 'r', encoding='utf-8') as file_obj:
-                    lines = file_obj.readlines()
-                    data[column_name] = [float(line.strip()) for line in lines]  # Convert values to floats
+                    print(f"      READ file: {file}")
+                    lines_list = file_obj.readlines()
+                    data_dict[column_name] = [float(line.strip()) for line in lines_list]  # Convert values to floats
+                    print(f"        Length: {len(data_dict[column_name])}")
             except IOError as e:
+                print(f"      FAIL to read file: {file}")
                 logging.error(f"Error reading file {filepath}: {str(e)}")
-    df = pd.DataFrame(data)
+    
+    df = pd.DataFrame.from_dict(data_dict)
+    print(f"      RETURNING combine_files_into_dataframe() with columns: {df.columns.values.tolist()}")
+    print(f"        df.head(): {df.head()}")
     return df
 
 def process_files(directory_path, output_directory):
@@ -55,11 +66,13 @@ def process_files(directory_path, output_directory):
 
     # Step 2: Combine every 3 files into a DataFrame
     for filename_root, files in file_groups.items():
+        print(f"  PROCESSING ROOT: {filename_root}")
         logging.info(f"Processing files with root: {filename_root}")
-        for i in range(0, len(files), 3):
-            subset_files = files[i:i+3]
+        for i in range(0, len(files), MODEL_COUNT):
+            subset_files = files[i:i+MODEL_COUNT]
+            print(f"  COMBINING {len(subset_files)} files: {subset_files}")
             df = combine_files_into_dataframe(subset_files, directory_path)
-
+            print(f"    BACK in process_files() with df: {df.head()}")
             # Step 3: Create output filename
             output_filename = filename_root + "_sentiment_combined.csv"
             output_filepath = os.path.join(output_directory, output_filename)
@@ -69,8 +82,12 @@ def process_files(directory_path, output_directory):
                 os.makedirs(output_directory, exist_ok=True)  # Create the output directory if it doesn't exist
                 df.to_csv(output_filepath, index=False)
                 logging.info(f"Combined file written to {output_filepath}")
+                return True
+            
             except IOError as e:
                 logging.error(f"Error writing file {output_filepath}: {str(e)}")
+                return False
+            
 
 if __name__ == "__main__":
     # Specify the input and output directory paths
@@ -78,4 +95,9 @@ if __name__ == "__main__":
     PATH_FILES_OUTPUT = os.path.join('..', 'data', 'step3_analysis')
 
     # Process the files
-    process_files(PATH_FILES_INPUT, PATH_FILES_OUTPUT)
+    if process_files(PATH_FILES_INPUT, PATH_FILES_OUTPUT) == True:
+        print(f"SUCCES: process_files() succeeded")
+    elif process_files(PATH_FILES_INPUT, PATH_FILES_OUTPUT == False):
+        print(f"FAILURE: process_files() failed")
+    else:
+        print(f"FAILURE: Invalid return from process_files()")
