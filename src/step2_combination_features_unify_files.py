@@ -82,11 +82,11 @@ def process_files(directory_path, output_directory):
                 os.makedirs(output_directory, exist_ok=True)  # Create the output directory if it doesn't exist
                 df.to_csv(output_filepath, index=False)
                 logging.info(f"Combined file written to {output_filepath}")
-                return True
+                # return True
             
             except IOError as e:
                 logging.error(f"Error writing file {output_filepath}: {str(e)}")
-                return False
+                # return False
             
 
 if __name__ == "__main__":
@@ -95,9 +95,7 @@ if __name__ == "__main__":
     PATH_FILES_OUTPUT = os.path.join('..', 'data', 'step3_analysis')
 
     # Process the files
-    if process_files(PATH_FILES_INPUT, PATH_FILES_OUTPUT) == True:
-        print(f"SUCCES: process_files() succeeded")
-    elif process_files(PATH_FILES_INPUT, PATH_FILES_OUTPUT == False):
-        print(f"FAILURE: process_files() failed")
+    if process_files(PATH_FILES_INPUT, PATH_FILES_OUTPUT):
+        print(f"SUCCESS: process_files() succeeded")
     else:
-        print(f"FAILURE: Invalid return from process_files()")
+        print(f"FAILURE: process_files() failed")
