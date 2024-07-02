@@ -1,4 +1,7 @@
 # AI-LIT:
+
+![Mistral Sentiment LOWESS](./graphs/sentiment_mistral_sma10percent_lowess_smoothing.png)
+
 # What is a Translator? Literary Translation in the Age of Large Language Models
     
 
@@ -10,3 +13,5 @@ There are a number of metrics that quantify the fidelity of machine translation,
 
 ### NOTE:
 This repo is in the process of being cleaned-up and reorganized. Please be patient...
+
+![Mean Sentiment Z-Score Normed](./graphs/mean_sentiment_zscore_norm.png)
