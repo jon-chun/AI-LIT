@@ -5,7 +5,7 @@
 # What is a Translator? Literary Translation in the Age of Large Language Models
     
 
-### **KEYWORDS** Large Language Models (LLMs)1, Translation2, Artificial Intelligence3, GPT4o4, Sentiment Analysis5, Stylometry6, Mistral7, GenAI8
+### **KEYWORDS** Large Language Models (LLMs), Translation, Artificial Intelligence, GPT4o, Sentiment Analysis, Stylometry, Mistral, GenAI
 
 ## **ABSTRACT** 
 
